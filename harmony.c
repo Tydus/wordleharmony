@@ -31,10 +31,6 @@ uint8_t popcnt(uint32_t n) {
 	return (uint8_t) n & 0x3F;
 }
 
-static int cmpstringp(const void *p1, const void *p2) {
-   return strcmp(p1, p2);
-}
-
 // TODO: this is too slow. Rewrite as DFA (and possibly do OMP).
 void load_words(const char *filename){
     clock_t start = clock();
@@ -53,7 +49,7 @@ void load_words(const char *filename){
         memcpy(words[words_size++], s, 5);
     }
 
-    qsort(words, words_size, 6, cmpstringp);
+    qsort(words, words_size, 6, (int (*)(const void *, const void *))strcmp);
 
     clock_t diff = clock() - start;
     unsigned long long nsec = diff * 1000 * 1000 * 1000 / CLOCKS_PER_SEC;
@@ -62,53 +58,58 @@ void load_words(const char *filename){
 
 }
 
-Dict *make_solo(){
+Dict **make_solo(){
     clock_t start = clock();
 
-    Dict *ret = (Dict *)malloc(sizeof(Dict) + WORD_LIST_SIZE * sizeof(Entry));
-    ret->length = 1;
-    ret->size = 0;
+    Dict **ret = malloc(26 * sizeof(Dict *));
+    for(int i = 0; i < 26; i++) {
+        ret[i] = (Dict *)malloc(sizeof(Dict) + WORD_LIST_SIZE * sizeof(Entry));
+        ret[i]->length = 1;
+        ret[i]->size = 0;
+    }
 
     for(size_t i = 0; i < words_size; i++) {
 #define F(x) (1 << (words[i][x] - 'a'))
-        uint32_t bitmap = F(0) | F(1) | F(2) | F(3) | F(4);
-#undef F
 
-        Entry *e = &ret->entry[ret->size];
-        e->bitmap = bitmap;
-        e->from_ids[0] = ret->size;
-        ret->size++;
+        uint8_t initial = words[i][0] - 'a';
+        Dict *d = ret[initial];
+        Entry *e = &d->entry[d->size];
+        e->bitmap = F(0) | F(1) | F(2) | F(3) | F(4);
+        e->from_ids[0] = i;
+        d->size++;
+
+#undef F
     }
 
     clock_t diff = clock() - start;
     unsigned long long nsec = diff * 1000 * 1000 * 1000 / CLOCKS_PER_SEC;
 
-    printf("Generate solo in %llu us.\n", nsec / 1000);
+    printf("Generated solo in %llu us.\n", nsec / 1000);
 
     return ret;
 }
 
-Dict *make_harmony(const Dict *d1, const Dict *d2, int print) {
+Dict *make_harmony_initial(const Dict *di1, const Dict *di2, int print, Dict *ret) {
     clock_t start = clock();
 
-    Dict *ret = (Dict *)malloc(sizeof(Dict) + INTERMEDIATE_BITMAP_SIZE_LIMIT * sizeof(Entry));
+    if(!ret) ret = (Dict *)malloc(sizeof(Dict) + INTERMEDIATE_BITMAP_SIZE_LIMIT * sizeof(Entry));
     ret->size = 0;
-    ret->length = d1->length + d2->length;
+    ret->length = di1->length + di2->length;
 
-    for(size_t i = 0; i < d1->size; i++)
-        for(size_t j = 0; j < d2->size; j++) {
-            const Entry *e1 = &d1->entry[i], *e2 = &d2->entry[j];
+    for(size_t i = 0; i < di1->size; i++)
+        for(size_t j = 0; j < di2->size; j++) {
+            const Entry *e1 = &di1->entry[i], *e2 = &di2->entry[j];
             uint32_t combined = e1->bitmap | e2->bitmap;
             if((e1->bitmap & e2->bitmap) == 0
-                && e1->from_ids[d1->length - 1] < e2->from_ids[0]
+                && e1->from_ids[di1->length - 1] < e2->from_ids[0]
             ){
                 Entry *eret = &ret->entry[ret->size++];
 
                 eret->bitmap = combined;
-                for(size_t ii = 0; ii < d1->length; ii++)
+                for(size_t ii = 0; ii < di1->length; ii++)
                     eret->from_ids[ii] = e1->from_ids[ii];
-                for(size_t ii = 0; ii < d2->length; ii++)
-                    eret->from_ids[ii + d1->length] = e2->from_ids[ii];
+                for(size_t ii = 0; ii < di2->length; ii++)
+                    eret->from_ids[ii + di1->length] = e2->from_ids[ii];
 
                 if(print) {
                     for(size_t ii = 0; ii < ret->length; ii++)
@@ -120,17 +121,44 @@ Dict *make_harmony(const Dict *d1, const Dict *d2, int print) {
             }
         }
 
+#ifdef VERBOSE
     clock_t diff = clock() - start;
-    size_t n_src = d1->size * d2->size;
+    size_t n_src = di1->size * di2->size;
 
     unsigned long long nsec = diff * 1000 * 1000 * 1000 / CLOCKS_PER_SEC;
     printf("|%9ld| x |%9ld| = |%9ld| (%.2f%%), %12llu us, %llu ns/src, %llu ns/dst.\n",
-        d1->size, d2->size, ret->size,
+        di1->size, di2->size, ret->size,
         100. * ret->size / n_src,
         nsec / 1000, 
         nsec / n_src,
         nsec / ret->size
     );
+#else
+    (void)start;
+#endif
+
+    return ret;
+}
+
+Dict **make_harmony(const Dict *const *d1, const Dict *const *d2) {
+    assert(d2[0]->length == 1);
+    size_t ret_length = d1[0]->length + d2[0]->length;
+
+    Dict **ret = malloc(26 * sizeof(Dict *));
+    for(int i = 0; i < 26; i++) {
+        ret[i] = (Dict *)malloc(sizeof(Dict) + WORD_LIST_SIZE * sizeof(Entry));
+        ret[i]->length = ret_length;
+        ret[i]->size = 0;
+    }
+
+    // Determine start and end point:
+    // TODO: details here.
+
+    for(int i1 = d1[0]->length - 1; i1 < 26; i1++) {
+        for(int i2 = i1 + 1; i2 < 26; i2++) {
+            make_harmony_initial(d1[i1], d2[i2], 0, ret[i2]);
+        }
+    }
 
     return ret;
 }
@@ -138,16 +166,30 @@ Dict *make_harmony(const Dict *d1, const Dict *d2, int print) {
 int main(int argc, char *argv[]){
     if(argc == 1) return -1;
     load_words(argv[1]);
-    Dict *solo = make_solo();
+    Dict **solo = make_solo();
 
-#define SHOW_DICT(x) printf("%-6s length = %d, size = %ld\n", #x, x->length, x->size); fflush(stdout);
+#define VERBOSE
+#ifdef VERBOSE 
+#define SHOW_DICT(x) { \
+        size_t __total = 0; \
+        for(int __i = 0; __i < 26; __i++){ \
+            printf("%-6s[%c] length = %d, size = %ld\n", #x, (char)(__i + 'a'), x[__i]->length, x[__i]->size); \
+            __total += x[__i]->size; \
+        } \
+        printf("Total: %lu\n", __total); \
+        fflush(stdout); \
+    }
+#else
+#define SHOW_DICT(x)
+#endif
 
     SHOW_DICT(solo);
-    Dict *duo    = make_harmony(solo,   solo, 0); SHOW_DICT(duo);
 
-    Dict *trio   = make_harmony(duo,    solo, 0); SHOW_DICT(trio);
+    Dict **duo    = make_harmony(solo,   solo); SHOW_DICT(duo);
 
-    Dict *quadro = make_harmony(trio,   solo, 0); SHOW_DICT(quadro);
+    Dict **trio   = make_harmony(duo,    solo); SHOW_DICT(trio);
 
-    Dict *pento  = make_harmony(quadro, solo, 1); SHOW_DICT(pento);
+    Dict **quadro = make_harmony(trio,   solo); SHOW_DICT(quadro);
+
+    Dict **pento  = make_harmony(quadro, solo); SHOW_DICT(pento);
 }
