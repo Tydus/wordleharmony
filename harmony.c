@@ -102,6 +102,8 @@ Dict *make_harmony_initial(const Dict *const di1, const Dict *const di2, int pri
         ret->length = di1->length + di2->length;
     }
 
+    if(di1->size == 0) return ret;
+
     for(size_t i = 0; i < di1->size; i++)
         for(size_t j = 0; j < di2->size; j++) {
             const Entry *e1 = &di1->entry[i], *e2 = &di2->entry[j];
