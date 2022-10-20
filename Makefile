@@ -1,5 +1,5 @@
 
-CFLAGS ?= -Ofast -mtune=native
+CFLAGS ?= -Ofast -mtune=native -openmp
 
 all: harmony
 

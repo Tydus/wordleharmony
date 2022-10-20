@@ -22,8 +22,6 @@ typedef struct {
 char words[WORD_LIST_SIZE][6];
 size_t words_size;
 
-char words_initial[26][WORD_LIST_SIZE][6];
-
 uint8_t popcnt(uint32_t n) {
 	n -= (n>>1) & 0x55555555;
 	n  = (n & 0x33333333) + ((n>>2) & 0x33333333);
@@ -37,6 +35,7 @@ static int cmpstringp(const void *p1, const void *p2) {
    return strcmp(p1, p2);
 }
 
+// TODO: this is too slow. Rewrite as DFA (and possibly do OMP).
 void load_words(const char *filename){
     clock_t start = clock();
 
@@ -63,30 +62,30 @@ void load_words(const char *filename){
 
 }
 
-Dict *make_root(){
+Dict *make_solo(){
     clock_t start = clock();
 
-    Dict *d1 = (Dict *)malloc(sizeof(Dict) + WORD_LIST_SIZE * sizeof(Entry));
-    d1->length = 1;
-    d1->size = 0;
+    Dict *ret = (Dict *)malloc(sizeof(Dict) + WORD_LIST_SIZE * sizeof(Entry));
+    ret->length = 1;
+    ret->size = 0;
 
     for(size_t i = 0; i < words_size; i++) {
 #define F(x) (1 << (words[i][x] - 'a'))
         uint32_t bitmap = F(0) | F(1) | F(2) | F(3) | F(4);
 #undef F
 
-        Entry *e = &d1->entry[d1->size];
+        Entry *e = &ret->entry[ret->size];
         e->bitmap = bitmap;
-        e->from_ids[0] = d1->size;
-        d1->size++;
+        e->from_ids[0] = ret->size;
+        ret->size++;
     }
 
     clock_t diff = clock() - start;
     unsigned long long nsec = diff * 1000 * 1000 * 1000 / CLOCKS_PER_SEC;
 
-    printf("Generate d1 in %llu us.\n", nsec / 1000);
+    printf("Generate solo in %llu us.\n", nsec / 1000);
 
-    return d1;
+    return ret;
 }
 
 Dict *make_harmony(const Dict *d1, const Dict *d2, int print) {
@@ -94,11 +93,9 @@ Dict *make_harmony(const Dict *d1, const Dict *d2, int print) {
 
     Dict *ret = (Dict *)malloc(sizeof(Dict) + INTERMEDIATE_BITMAP_SIZE_LIMIT * sizeof(Entry));
     ret->size = 0;
-    //assert(d1->length >= d2->length);
     ret->length = d1->length + d2->length;
 
     for(size_t i = 0; i < d1->size; i++)
-        //for(size_t j = (d1 == d2 ? i + 1 : 0); j < d2->size; j++) {
         for(size_t j = 0; j < d2->size; j++) {
             const Entry *e1 = &d1->entry[i], *e2 = &d2->entry[j];
             uint32_t combined = e1->bitmap | e2->bitmap;
@@ -114,7 +111,6 @@ Dict *make_harmony(const Dict *d1, const Dict *d2, int print) {
                     eret->from_ids[ii + d1->length] = e2->from_ids[ii];
 
                 if(print) {
-                    //printf("%p | %p = %p:", e1->bitmap, e2->bitmap, eret->bitmap);
                     for(size_t ii = 0; ii < ret->length; ii++)
                         printf("%s ", words[eret->from_ids[ii]]);
                     printf(" ");
@@ -142,16 +138,16 @@ Dict *make_harmony(const Dict *d1, const Dict *d2, int print) {
 int main(int argc, char *argv[]){
     if(argc == 1) return -1;
     load_words(argv[1]);
-    Dict *d1 = make_root();
+    Dict *solo = make_solo();
 
-#define SHOW_DICT(x) printf("%s length = %d, size = %ld\n", #x, x->length, x->size); fflush(stdout);
+#define SHOW_DICT(x) printf("%-6s length = %d, size = %ld\n", #x, x->length, x->size); fflush(stdout);
 
-    SHOW_DICT(d1);
-    Dict *d2 = make_harmony(d1, d1, 0); SHOW_DICT(d2);
+    SHOW_DICT(solo);
+    Dict *duo    = make_harmony(solo,   solo, 0); SHOW_DICT(duo);
 
-    Dict *d3 = make_harmony(d2, d1, 0); SHOW_DICT(d3);
+    Dict *trio   = make_harmony(duo,    solo, 0); SHOW_DICT(trio);
 
-    Dict *d4 = make_harmony(d3, d1, 0); SHOW_DICT(d4);
+    Dict *quadro = make_harmony(trio,   solo, 0); SHOW_DICT(quadro);
 
-    Dict *d5 = make_harmony(d4, d1, 1); SHOW_DICT(d5);
+    Dict *pento  = make_harmony(quadro, solo, 1); SHOW_DICT(pento);
 }
