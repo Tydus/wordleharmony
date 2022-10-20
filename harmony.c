@@ -5,8 +5,9 @@
 #include <stdlib.h>
 #include <assert.h>
 
+#define VERBOSE
 #define WORD_LIST_SIZE 15000
-#define INTERMEDIATE_BITMAP_SIZE_LIMIT 2000000000
+#define INTERMEDIATE_BITMAP_SIZE_LIMIT 50000000
 
 typedef struct {
     uint32_t bitmap;
@@ -14,7 +15,7 @@ typedef struct {
 } Entry;
 
 typedef struct {
-    uint8_t length;
+    size_t length;
     size_t size;
     Entry entry[];
 } Dict;
@@ -89,12 +90,16 @@ Dict **make_solo(){
     return ret;
 }
 
-Dict *make_harmony_initial(const Dict *di1, const Dict *di2, int print, Dict *ret) {
+Dict *make_harmony_initial(const Dict *const di1, const Dict *const di2, int print, Dict *ret) {
     clock_t start = clock();
 
-    if(!ret) ret = (Dict *)malloc(sizeof(Dict) + INTERMEDIATE_BITMAP_SIZE_LIMIT * sizeof(Entry));
-    ret->size = 0;
-    ret->length = di1->length + di2->length;
+    if(ret){
+        assert(ret->length == di1->length + di2->length);
+    }else{
+        ret = (Dict *)malloc(sizeof(Dict) + INTERMEDIATE_BITMAP_SIZE_LIMIT * sizeof(Entry));
+        ret->size = 0;
+        ret->length = di1->length + di2->length;
+    }
 
     for(size_t i = 0; i < di1->size; i++)
         for(size_t j = 0; j < di2->size; j++) {
@@ -120,6 +125,7 @@ Dict *make_harmony_initial(const Dict *di1, const Dict *di2, int print, Dict *re
 
             }
         }
+    assert(ret->length < INTERMEDIATE_BITMAP_SIZE_LIMIT);
 
 #ifdef VERBOSE
     clock_t diff = clock() - start;
@@ -140,25 +146,24 @@ Dict *make_harmony_initial(const Dict *di1, const Dict *di2, int print, Dict *re
     return ret;
 }
 
-Dict **make_harmony(const Dict *const *d1, const Dict *const *d2) {
+Dict **make_harmony(const Dict *const *const d1, const Dict *const *const d2) {
     assert(d2[0]->length == 1);
     size_t ret_length = d1[0]->length + d2[0]->length;
 
     Dict **ret = malloc(26 * sizeof(Dict *));
     for(int i = 0; i < 26; i++) {
-        ret[i] = (Dict *)malloc(sizeof(Dict) + WORD_LIST_SIZE * sizeof(Entry));
+        ret[i] = (Dict *)malloc(sizeof(Dict) + INTERMEDIATE_BITMAP_SIZE_LIMIT * sizeof(Entry));
         ret[i]->length = ret_length;
         ret[i]->size = 0;
     }
 
-    // Determine start and end point:
+    // TODO: Determine start and end point:
     // TODO: details here.
-
-    for(int i1 = d1[0]->length - 1; i1 < 26; i1++) {
-        for(int i2 = i1 + 1; i2 < 26; i2++) {
-            make_harmony_initial(d1[i1], d2[i2], 0, ret[i2]);
-        }
-    }
+    for(int i1 = 0; i1 < 26; i1++)
+#pragma omp parallel for schedule(dynamic)
+        for(int i2 = 0; i2 < 26; i2++)
+            if(i1 < i2)
+                make_harmony_initial(d1[i1], d2[i2], 0, ret[i2]);
 
     return ret;
 }
@@ -168,12 +173,11 @@ int main(int argc, char *argv[]){
     load_words(argv[1]);
     Dict **solo = make_solo();
 
-#define VERBOSE
 #ifdef VERBOSE 
 #define SHOW_DICT(x) { \
         size_t __total = 0; \
         for(int __i = 0; __i < 26; __i++){ \
-            printf("%-6s[%c] length = %d, size = %ld\n", #x, (char)(__i + 'a'), x[__i]->length, x[__i]->size); \
+            printf("%-6s[%c] length = %lu, size = %ld\n", #x, (char)(__i + 'a'), x[__i]->length, x[__i]->size); \
             __total += x[__i]->size; \
         } \
         printf("Total: %lu\n", __total); \
