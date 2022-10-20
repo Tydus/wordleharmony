@@ -8,6 +8,7 @@
 #define VERBOSE
 #define WORD_LIST_SIZE 15000
 #define INTERMEDIATE_BITMAP_SIZE_LIMIT 50000000
+#define DICT_INITIAL_SIZE_LIMIT 10000000
 
 typedef struct {
     uint32_t bitmap;
@@ -96,7 +97,7 @@ Dict *make_harmony_initial(const Dict *const di1, const Dict *const di2, int pri
     if(ret){
         assert(ret->length == di1->length + di2->length);
     }else{
-        ret = (Dict *)malloc(sizeof(Dict) + INTERMEDIATE_BITMAP_SIZE_LIMIT * sizeof(Entry));
+        ret = (Dict *)malloc(sizeof(Dict) + DICT_INITIAL_SIZE_LIMIT * sizeof(Entry));
         ret->size = 0;
         ret->length = di1->length + di2->length;
     }
@@ -125,7 +126,7 @@ Dict *make_harmony_initial(const Dict *const di1, const Dict *const di2, int pri
 
             }
         }
-    assert(ret->length < INTERMEDIATE_BITMAP_SIZE_LIMIT);
+    assert(ret->size < DICT_INITIAL_SIZE_LIMIT);
 
 #ifdef VERBOSE
     clock_t diff = clock() - start;
@@ -150,6 +151,16 @@ Dict **make_harmony(const Dict *const *const d1, const Dict *const *const d2) {
     assert(d2[0]->length == 1);
     size_t ret_length = d1[0]->length + d2[0]->length;
 
+    Dict *tmp[26][26];
+
+    // TODO: Determine start and end point:
+    // TODO: details here.
+#pragma omp parallel for schedule(dynamic,1) collapse(2)
+    for(int i1 = 0; i1 < 26; i1++)
+        for(int i2 = 0; i2 < 26; i2++)
+            if(i1 < i2)
+                tmp[i1][i2] = make_harmony_initial(d1[i1], d2[i2], 0, NULL);
+
     Dict **ret = malloc(26 * sizeof(Dict *));
     for(int i = 0; i < 26; i++) {
         ret[i] = (Dict *)malloc(sizeof(Dict) + INTERMEDIATE_BITMAP_SIZE_LIMIT * sizeof(Entry));
@@ -157,13 +168,14 @@ Dict **make_harmony(const Dict *const *const d1, const Dict *const *const d2) {
         ret[i]->size = 0;
     }
 
-    // TODO: Determine start and end point:
-    // TODO: details here.
     for(int i1 = 0; i1 < 26; i1++)
-#pragma omp parallel for schedule(dynamic)
+//#pragma omp parallel for schedule(dynamic)
         for(int i2 = 0; i2 < 26; i2++)
-            if(i1 < i2)
-                make_harmony_initial(d1[i1], d2[i2], 0, ret[i2]);
+            if(i1 < i2) {
+                memcpy(ret[i2]->entry + ret[i2]->size, tmp[i1][i2]->entry, tmp[i1][i2]->size * sizeof(Entry));
+                ret[i2]->size += tmp[i1][i2]->size;
+                free(tmp[i1][i2]);
+            }
 
     return ret;
 }
